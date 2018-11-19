@@ -1,22 +1,23 @@
-const BITBOXSDK = require('bitbox-sdk/lib/bitbox-sdk').default
+"use strict"
+const BITBOXSDK = require("bitbox-sdk/lib/bitbox-sdk").default
 const BITBOX = new BITBOXSDK()
-const BigNumber = require('slpjs/node_modules/bignumber.js')
-const slpjs = require('slpjs')
-const bchaddr = require('bchaddrjs-slp')
-const WH = require('wormhole-sdk/lib/Wormhole').default
+const BigNumber = require("slpjs/node_modules/bignumber.js")
+const slpjs = require("slpjs")
+const bchaddr = require("bchaddrjs-slp")
+const WH = require("wormhole-sdk/lib/Wormhole").default
 const Wormhole = new WH({
-  restURL: `https://rest.bitcoin.com/v1/`,
+  restURL: `https://rest.bitcoin.com/v1/`
 })
 
 class BitboxUtils {
-  static async getLargestUtxo (address) {
+  static async getLargestUtxo(address) {
     return new Promise((resolve, reject) => {
       BITBOX.Address.utxo(address).then(
         result => {
           try {
-            const utxo = result.sort((a, b) => {
-              return a.satoshis - b.satoshis
-            })[result.length - 1]
+            const utxo = result.sort((a, b) => a.satoshis - b.satoshis)[
+              result.length - 1
+            ]
             resolve(utxo)
           } catch (ex) {
             reject(ex)
@@ -29,7 +30,18 @@ class BitboxUtils {
     })
   }
 
-  static async getAllUtxo (address) {
+  static async getAllTransactionsForAddress(address) {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const result = await BITBOX.Address.transactions(address)
+        resolve(result)
+      } catch (ex) {
+        reject(ex)
+      }
+    })
+  }
+
+  static async getAllUtxo(address) {
     return new Promise((resolve, reject) => {
       BITBOX.Address.utxo(address).then(
         result => {
@@ -42,15 +54,12 @@ class BitboxUtils {
     })
   }
 
-  static async getTransactionDetails (txid) {
+  static async getTransactionDetails(txid) {
     return new Promise((resolve, reject) => {
       BITBOX.Transaction.details(txid).then(
         result => {
-          if (result) {
-            resolve(result)
-          } else {
-            reject('Undefined transaction details for', txid)
-          }
+          if (result) resolve(result)
+          else reject("Undefined transaction details for", txid)
         },
         err => {
           reject(err)
@@ -59,15 +68,15 @@ class BitboxUtils {
     })
   }
 
-  static async publishTx (hex) {
+  static async publishTx(hex) {
     return new Promise((resolve, reject) => {
       BITBOX.RawTransactions.sendRawTransaction(hex).then(
         result => {
           try {
-            console.log('txid: ', result)
+            console.log("txid: ", result)
             if (result.length !== 64) {
               // TODO: Validate result is a txid
-              reject('Transaction failed: ' + result)
+              reject(`Transaction failed: ${result}`)
             } else {
               resolve(result)
             }
@@ -82,43 +91,50 @@ class BitboxUtils {
     })
   }
 
-  static signAndPublishBchTransaction (txParams, keyPair, spendableUtxos) {
+  static signAndPublishBchTransaction(txParams, keyPair, spendableUtxos) {
     return new Promise(async (resolve, reject) => {
       try {
         const from = txParams.from
         const to = txParams.to
         const satoshisToSend = parseInt(txParams.value)
 
-        if (!spendableUtxos || spendableUtxos.length === 0) {
-            throw new Error('Insufficient funds')
-        }
+        if (!spendableUtxos || spendableUtxos.length === 0)
+          throw new Error("Insufficient funds")
 
-        const transactionBuilder = new BITBOX.TransactionBuilder('bitcoincash')
+        const transactionBuilder = new BITBOX.TransactionBuilder("bitcoincash")
 
         let totalUtxoAmount = 0
-        spendableUtxos.forEach((utxo) => {
-            if (utxo.spendable !== true) {
-              throw new Error('Cannot spend unspendable utxo')
-            }
-            transactionBuilder.addInput(utxo.txid, utxo.vout)
-            totalUtxoAmount += utxo.satoshis
+        spendableUtxos.forEach(utxo => {
+          if (utxo.spendable !== true)
+            throw new Error("Cannot spend unspendable utxo")
+
+          transactionBuilder.addInput(utxo.txid, utxo.vout)
+          totalUtxoAmount += utxo.satoshis
         })
 
-        const byteCount = BITBOX.BitcoinCash.getByteCount({ P2PKH: spendableUtxos.length }, { P2PKH: 2 })
-        
+        const byteCount = BITBOX.BitcoinCash.getByteCount(
+          { P2PKH: spendableUtxos.length },
+          { P2PKH: 2 }
+        )
+
         const satoshisRemaining = totalUtxoAmount - byteCount - satoshisToSend
 
         // Destination output
         transactionBuilder.addOutput(to, satoshisToSend)
 
         // Return remaining balance output
-        if (satoshisRemaining >= 546) {
+        if (satoshisRemaining >= 546)
           transactionBuilder.addOutput(from, satoshisRemaining)
-        }
 
         let redeemScript
         spendableUtxos.forEach((utxo, index) => {
-            transactionBuilder.sign(index, keyPair, redeemScript, transactionBuilder.hashTypes.SIGHASH_ALL, utxo.satoshis)
+          transactionBuilder.sign(
+            index,
+            keyPair,
+            redeemScript,
+            transactionBuilder.hashTypes.SIGHASH_ALL,
+            utxo.satoshis
+          )
         })
 
         const hex = transactionBuilder.build().toHex()
@@ -132,13 +148,21 @@ class BitboxUtils {
     })
   }
 
-  static signAndPublishSlpTransaction (txParams, keyPair, spendableUtxos, tokenMetadata, spendableTokenUtxos) {
+  static signAndPublishSlpTransaction(
+    txParams,
+    keyPair,
+    spendableUtxos,
+    tokenMetadata,
+    spendableTokenUtxos
+  ) {
     return new Promise(async (resolve, reject) => {
       try {
         const from = txParams.from
         const to = bchaddr.toCashAddress(txParams.to)
         const tokenDecimals = tokenMetadata.decimals
-        const scaledTokenSendAmount = (new BigNumber(txParams.value)).decimalPlaces(tokenDecimals)
+        const scaledTokenSendAmount = new BigNumber(
+          txParams.value
+        ).decimalPlaces(tokenDecimals)
         const tokenSendAmount = scaledTokenSendAmount.times(10 ** tokenDecimals)
 
         let tokenBalance = new BigNumber(0)
@@ -147,36 +171,35 @@ class BitboxUtils {
           tokenBalance = tokenBalance.plus(utxoBalance)
         }
 
-        if (!tokenBalance.gte(tokenSendAmount)) {
-          throw new Error('Insufficient tokens')
-        }
+        if (!tokenBalance.gte(tokenSendAmount))
+          throw new Error("Insufficient tokens")
 
         const tokenChangeAmount = tokenBalance.minus(tokenSendAmount)
 
         const sendOpReturn = slpjs.slp.buildSendOpReturn({
           tokenIdHex: txParams.sendTokenData.tokenId,
-          outputQtyArray: [tokenSendAmount, tokenChangeAmount],
+          outputQtyArray: [tokenSendAmount, tokenChangeAmount]
         })
 
         const inputUtxos = spendableUtxos.concat(spendableTokenUtxos)
 
         const tokenReceiverAddressArray = [to, from]
 
-        const transactionBuilder = new BITBOX.TransactionBuilder('bitcoincash')
+        const transactionBuilder = new BITBOX.TransactionBuilder("bitcoincash")
 
         let totalUtxoAmount = 0
-        inputUtxos.forEach((utxo) => {
-            transactionBuilder.addInput(utxo.txid, utxo.vout)
-            totalUtxoAmount += utxo.satoshis
+        inputUtxos.forEach(utxo => {
+          transactionBuilder.addInput(utxo.txid, utxo.vout)
+          totalUtxoAmount += utxo.satoshis
         })
 
         const byteCount = slpjs.slp.calculateSendCost(
           sendOpReturn.length,
           inputUtxos.length,
           tokenReceiverAddressArray.length + 1, // +1 to receive remaining BCH
-          from,
+          from
         )
-        
+
         const satoshisRemaining = totalUtxoAmount - byteCount
 
         // SLP data output
@@ -193,7 +216,13 @@ class BitboxUtils {
 
         let redeemScript
         inputUtxos.forEach((utxo, index) => {
-            transactionBuilder.sign(index, keyPair, redeemScript, transactionBuilder.hashTypes.SIGHASH_ALL, utxo.satoshis)
+          transactionBuilder.sign(
+            index,
+            keyPair,
+            redeemScript,
+            transactionBuilder.hashTypes.SIGHASH_ALL,
+            utxo.satoshis
+          )
         })
 
         const hex = transactionBuilder.build().toHex()
@@ -206,16 +235,20 @@ class BitboxUtils {
     })
   }
 
-  static signAndPublishWormholeTransaction (txParams, keyPair, spendableUtxos, propertyId) {
+  static signAndPublishWormholeTransaction(
+    txParams,
+    keyPair,
+    spendableUtxos,
+    propertyId
+  ) {
     return new Promise(async (resolve, reject) => {
       try {
         const from = txParams.from
         const to = txParams.to
         const sendTokenAmount = txParams.value
 
-        if (!spendableUtxos || spendableUtxos.length === 0) {
-            throw new Error('Insufficient funds')
-        }
+        if (!spendableUtxos || spendableUtxos.length === 0)
+          throw new Error("Insufficient funds")
 
         // const propertyId = tokenMetadata.protocolData.propertyId
         const payload = await Wormhole.PayloadCreation.simpleSend(
@@ -227,9 +260,9 @@ class BitboxUtils {
           utxo.value = utxo.amount
           return utxo
         })
-        if (inputUtxos.length >= 2) {
+        if (inputUtxos.length >= 2)
           inputUtxos = inputUtxos.sort((a, b) => a.satoshis - b.satoshis)
-        }
+
         let inputUtxo
         for (const utxo of inputUtxos) {
           if (utxo.satoshis > 1000) {
@@ -238,9 +271,7 @@ class BitboxUtils {
           }
         }
 
-        if (!inputUtxo) {
-          throw new Error('Insufficient funds to send tokens')
-      }
+        if (!inputUtxo) throw new Error("Insufficient funds to send tokens")
 
         const rawTx = await Wormhole.RawTransactions.create([inputUtxo], {})
         const opReturn = await Wormhole.RawTransactions.opReturn(rawTx, payload)
@@ -255,12 +286,12 @@ class BitboxUtils {
         const tb = Wormhole.Transaction.fromTransaction(tx)
 
         let totalUtxoAmount = 0
-        inputUtxos.forEach((utxo) => {
-            if (utxo.spendable !== true) {
-              throw new Error('Cannot spend unspendable utxo')
-            }
-            // transactionBuilder.addInput(utxo.txid, utxo.vout)
-            totalUtxoAmount += utxo.satoshis
+        inputUtxos.forEach(utxo => {
+          if (utxo.spendable !== true)
+            throw new Error("Cannot spend unspendable utxo")
+
+          // transactionBuilder.addInput(utxo.txid, utxo.vout)
+          totalUtxoAmount += utxo.satoshis
         })
 
         let redeemScript
